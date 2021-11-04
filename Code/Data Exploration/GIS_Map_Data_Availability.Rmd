@@ -1,0 +1,52 @@
+---
+title: "GIS_Map_Data_Availability"
+author: "Jorge Arroyo-Esquivel"
+date: "26/5/2020"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+### Let's load the required packages
+```{r}
+library(ggmap)
+library(tidyverse)
+library(here)
+```
+
+### Let's load the data and clean it to our desired boundaries
+```{r,message=FALSE, warning=FALSE, include=FALSE}
+desiredYears <- c(2007)
+latitudeBoundaries <- c(38.5,39.75)
+
+dataFilesKelp <- list.files(paste(here(),'Raw Data/Kelp Data',sep='/'),pattern = ".csv",full.names = TRUE)
+dataList <- lapply(dataFilesKelp,function(x){
+  df <- read_table2(x, skip = 2)
+  df <- df[c(2,4,5)]
+  colnames(df) <- c('Latitude','Longitude','Coverage')
+  yearPosition <- regexpr('Kelp Data',dataFilesKelp[1])+10
+  df <- df %>% mutate(Year=as.numeric(substr(x,yearPosition,yearPosition+3))) %>% dplyr::select(Year,Latitude,Longitude,Coverage)
+  df %>% right_join(data.frame(Year=desiredYears)) %>% filter(between(Latitude,latitudeBoundaries[1],latitudeBoundaries[2]))
+})
+kelpData <- do.call("rbind",dataList)
+
+urchinData <-
+  read.csv(paste(here(), 'Raw Data/Urchin Data/Reef Check Urchin Data.csv', sep =
+                   '/')) %>% right_join(data.frame(Year = desiredYears)) %>% filter(between(Lat, 38.5, 39.75)) %>% group_by(Year, Lat,Lon) %>% summarise(TotalObservations = n(),MeanCount = mean(as.numeric(Count)))
+```
+
+### Let's put the data into a map
+```{r}
+xlim <- c(min(min(kelpData$Longitude),min(urchinData$Lon)),max(max(kelpData$Longitude),max(urchinData$Lon)))
+ylim <- c(min(min(kelpData$Latitude),min(urchinData$Lat)),max(max(kelpData$Latitude),max(urchinData$Lat)))
+
+data('wrld_simpl')
+kelpObs <- unique(kelpData %>% dplyr::select(Latitude,Longitude))
+urchinObs <- unique(urchinData %>% ungroup() %>%  dplyr::select(Lat,Lon))
+
+p <- ggmap(get_map(location=c(left=min(xlim),bottom=min(ylim),right=max(xlim),top=max(ylim)),maptype = 'stamen'))+geom_point(data=kelpObs,aes(Longitude,Latitude),colour='#009E73',size=0.75)+geom_point(data=urchinObs,aes(Lon,Lat),colour='#CC79A7',size=2)
+p
+```
+

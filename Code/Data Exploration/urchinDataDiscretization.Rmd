@@ -1,0 +1,68 @@
+---
+title: "urchinDataDiscretization"
+author: "Jorge Arroyo-Esquivel"
+date: "7/5/2020"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+### Let's install tidyverse to analyze the data
+```{r}
+library(tidyverse)
+library(here)
+```
+
+### Let's load the data
+```{r}
+data <- read.csv(paste(here(),'Raw Data/Urchin Data/Reef Check Urchin Data.csv',sep='/'))
+summary(data)
+```
+
+We only care about some Latitudes (between 38.5 and 39.75)
+
+### Let's clean and summarize the data that we want
+```{r}
+data$Lat <- round(data$Lat,digits=4)
+cleanData <- data %>% filter(between(Lat,38.5,39.75)) %>% group_by(Year,Lat) %>% summarise(TotalObservations=n(),MeanCount=mean(as.numeric(Count)))
+cleanData %>% filter(Year==2007) %>% ggplot()+geom_point(aes(Lat,MeanCount))
+```
+
+Data is pretty scarce.
+
+### Let's repeat the process done on kelp of interpolating data as a first approximation
+```{r}
+stepSize <- 1e-4
+n <- ceiling((39.75-38.5)/stepSize)
+x <- round(seq(38.5,39.75,length.out = n),digits=4)
+years <- unique(cleanData$Year)
+
+U <- NULL
+for(i in years){
+  currYear <- cleanData %>% filter(Year==i) %>% ungroup() %>%  select(Lat,MeanCount)
+  Ut <- data.frame(Lat=x) %>% left_join(currYear)
+  for(j in 1:n){
+    if(is.na(Ut$MeanCount[j])){
+      gap <- Ut$MeanCount[j:min(j+60,n)]
+      
+      Ut$MeanCount[j] <- ifelse(is.nan(mean(gap,na.rm = TRUE)),0,mean(gap,na.rm = TRUE))
+    }
+  }
+  U <- cbind(U,Ut$MeanCount)
+}
+```
+
+### Let's plot this and see how it looks
+```{r}
+plot(x,U[,10],type='l')
+```
+
+This suggests we should work on a more local scale, where urchin data is easily interpolabable and Ut(x) is reliable
+
+### Let's save these results
+```{r}
+save(x,U,file='Utx.rdata')
+```
+

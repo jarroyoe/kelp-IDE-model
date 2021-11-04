@@ -1,0 +1,93 @@
+---
+title: "kelpDataDiscretization"
+author: Jorge Arroyo-Esquivel
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+### Let's install tidvyerse to analyze the data
+```{r,message=FALSE}
+library(tidyverse)
+library(here)
+```
+
+### Let's load the data
+```{r,message=FALSE, warning=FALSE, include=FALSE}
+dataFiles <- list.files(paste(here(),'Raw Data/Kelp Data',sep='/'),pattern = ".csv",full.names = TRUE)
+dataList <- lapply(dataFiles,function(x){
+  df <- read_table2(x, skip = 2)
+  df <- df[c(2,4,5)]
+  colnames(df) <- c('Latitude','Longitude','Coverage')
+  yearPosition <- regexpr('Kelp Data',dataFiles[1])+10
+  df <- df %>% mutate(Year=as.numeric(substr(x,yearPosition,yearPosition+3))) %>% select(Year,Latitude,Longitude,Coverage)
+  df
+})
+data <- do.call("rbind",dataList)
+```
+
+Each year the number of observations seems to vary too much!
+
+### Let's analyze the uniformity of the data
+```{r}
+data$Latitude <- round(data$Latitude,digits = 4)
+dataSummary <- data %>% group_by(Year,Latitude) %>% summarise(MinLongitude=min(Longitude),MaxLongitude=max(Longitude),TotalLatitudes=n(),MeanCoverage=mean(Coverage))
+hist(dataSummary$TotalLatitudes)
+hist(data$Latitude)
+hist((dataSummary %>% filter(Year==min(data$Year)))$Latitude)
+hist((dataSummary %>% filter(Year==max(data$Year)))$Latitude)
+```
+
+Most latitudes only have one observation each year, and some latitudes are more sampled than others, but latitude range seems to be more or less consistent. 
+
+### Let's double check on that
+```{r}
+dataLatitudes <- dataSummary %>% group_by(Year) %>% summarise(MinLatitude=min(Latitude),MaxLatitude=max(Latitude))
+hist(dataLatitudes$MinLatitude)
+hist(dataLatitudes$MaxLatitude)
+
+dataLatitudes %>% ggplot() + geom_line(aes(x=Year,y=MinLatitude))+geom_line(aes(x=Year,y=MaxLatitude))
+```
+
+Minimum latitude seems to be consistent through time around 38.5
+
+Maximum latitude seems to be more varied. Let's arbitrarily pick the 39.75 line as a threshold
+
+### We also will fill the gaps to have an uniform space in a single year
+```{r}
+continuousData <- dataSummary %>% filter(between(Latitude,38.5,39.75))
+print(paste('By forcing the latitudes to be between 38.5 and 39.75, we recover',length(continuousData$Latitude)/length(dataSummary$Latitude)*100,'% of the data.'))
+
+#Let's discretize the data
+stepSize <- min(abs(diff(continuousData$Latitude)))
+n <- ceiling((39.75-38.5)/stepSize)
+x=round(seq(38.5,39.75,length.out = n),digits=4)
+A <- NULL
+for(i in 1985:2019){
+  currYear <- continuousData %>% filter(Year==i) %>% ungroup() %>%  select(Latitude,MeanCoverage)
+  At <- data.frame(Latitude=x) %>% left_join(currYear)
+  for(j in 1:n){
+    if(is.na(At$MeanCoverage[j])){
+      gap <- At$MeanCoverage[j:min(j+60,n)]
+      
+      At$MeanCoverage[j] <- ifelse(is.nan(mean(gap,na.rm = TRUE)),0,mean(gap,na.rm = TRUE))
+    }
+  }
+  A <- cbind(A,At$MeanCoverage)
+}
+```
+
+Great! Now we have an approximated A_t(x). 
+
+###Let's see how a year looks like
+```{r}
+plot(x,A[,1],type='l')
+```
+
+### Let's save our results
+```{r}
+save(x,A,file='Atx.rdata')
+```
+
